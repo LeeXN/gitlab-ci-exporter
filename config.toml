@@ -1,0 +1,15 @@
+[server]
+host = "0.0.0.0"
+port = 3000
+
+[gitlab]
+url = "https://your-gitlab-url"
+token = "your gitlab token"
+# Monitor these groups (app will fetch all projects inside them)
+monitor_groups = ["group1", "group2/subgroup1"]
+# Only sync pipelines for branches matching this regex (optional)
+branch_filter_regex = ".*"
+
+[poller]
+interval_seconds = 30
+backfill_days = 30
