@@ -24,10 +24,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
-      
       - name: Check code
         run: cargo check --workspace
-        
       - name: Run Tests
         run: cargo test --workspace
 
@@ -52,10 +50,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cargo-zigbuild and zig
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Install cargo-zigbuild
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-zigbuild,zig
+          tool: cargo-zigbuild
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
@@ -113,6 +116,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: backend-amd64
