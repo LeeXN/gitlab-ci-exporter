@@ -8,12 +8,13 @@ COPY . .
 # Build static binary for musl target
 RUN cargo build --release --target x86_64-unknown-linux-musl
 
-FROM scratch
+FROM alpine:3.22
 # Copy statically-linked binary
 WORKDIR /app
 COPY --from=builder /home/rust/src/target/x86_64-unknown-linux-musl/release/gitlab-ci-exporter /gitlab-ci-exporter
 # Default config (can be mounted at runtime)
 COPY config.toml /app/config.toml
+RUN chmod +x /gitlab-ci-exporter
 
 EXPOSE 3000
 
