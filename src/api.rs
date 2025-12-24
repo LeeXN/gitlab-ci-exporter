@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use chrono::TimeZone;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct PipelineFilter {
     project_name: Option<String>,
     ref_name: Option<String>,
@@ -39,6 +39,7 @@ pub struct PipelineResponse {
     pub id: i64,
     pub project_id: i64,
     pub project_name: String,
+    pub project_full_path: String,
     pub ref_name: String,
     pub sha: String,
     pub user_name: String,
@@ -111,7 +112,7 @@ async fn get_project_stats(
     let use_fast_path = filter.ref_name.as_deref().unwrap_or("All") == "All";
 
     // Build a cache key from filters
-    let key = format!("projects:{}:{}:{}:{:?}:{:?}",
+    let key = format!("projects:{:?}:{:?}:{:?}:{:?}:{:?}",
         filter.project_name.as_deref().unwrap_or("All"),
         filter.ref_name.as_deref().unwrap_or("All"),
         filter.exclude_projects.as_deref().unwrap_or(""),
@@ -130,10 +131,11 @@ async fn get_project_stats(
         sqlx::QueryBuilder::new(
             r#"
             SELECT 
-                project_name, 
+                project_full_path as project_name, 
+                project_full_path,
                 SUM(count) as count, 
                     COALESCE(CAST(SUM(total_duration) AS REAL) / NULLIF(SUM(count_with_duration), 0), 0) as avg_duration,
-                (SELECT status FROM pipelines p2 WHERE p2.project_full_path = daily_stats.project_name ORDER BY created_at DESC LIMIT 1) as last_status
+                (SELECT status FROM pipelines p2 WHERE p2.project_full_path = daily_stats.project_full_path ORDER BY created_at DESC LIMIT 1) as last_status
             FROM daily_stats 
             WHERE 1=1
             "#
@@ -143,6 +145,7 @@ async fn get_project_stats(
             r#"
             SELECT 
                 project_name, 
+                project_full_path,
                 COUNT(*) as count, 
                 AVG(duration) as avg_duration,
                 (SELECT status FROM pipelines p2 WHERE p2.project_full_path = pipelines.project_full_path ORDER BY created_at DESC LIMIT 1) as last_status
@@ -153,11 +156,11 @@ async fn get_project_stats(
     };
 
     if let Some(p) = &filter.project_name {
-        if p != "All" && !p.is_empty() {
+            if p != "All" && !p.is_empty() {
             if p.contains(',') {
                 let projects: Vec<&str> = p.split(',').map(|s| s.trim()).collect();
                 if !projects.is_empty() {
-                    query_builder.push(" AND project_name IN (");
+                    query_builder.push(" AND project_full_path IN (");
                     let mut separated = query_builder.separated(", ");
                     for proj in projects {
                         separated.push_bind(proj);
@@ -165,17 +168,29 @@ async fn get_project_stats(
                     separated.push_unseparated(") ");
                 }
             } else {
-                query_builder.push(" AND project_name = ");
+                query_builder.push(" AND project_full_path = ");
                 query_builder.push_bind(p);
             }
         }
     }
     
-                if !use_fast_path {
+    if !use_fast_path {
         if let Some(r) = &filter.ref_name {
             if r != "All" && !r.is_empty() {
-                query_builder.push(" AND ref_name = ");
-                query_builder.push_bind(r);
+                if r.contains(',') {
+                    let refs: Vec<&str> = r.split(',').map(|s| s.trim()).collect();
+                    if !refs.is_empty() {
+                        query_builder.push(" AND ref_name IN (");
+                        let mut separated = query_builder.separated(", ");
+                        for rv in refs {
+                            separated.push_bind(rv);
+                        }
+                        separated.push_unseparated(") ");
+                    }
+                } else {
+                    query_builder.push(" AND ref_name = ");
+                    query_builder.push_bind(r);
+                }
             }
         }
     }
@@ -184,7 +199,7 @@ async fn get_project_stats(
         if !ex.is_empty() {
             let projects: Vec<&str> = ex.split(',').collect();
             if !projects.is_empty() {
-                query_builder.push(" AND project_name NOT IN (");
+                query_builder.push(" AND project_full_path NOT IN (");
                 let mut separated = query_builder.separated(", ");
                 for p in projects {
                     separated.push_bind(p);
@@ -216,7 +231,7 @@ async fn get_project_stats(
         }
     }
 
-    query_builder.push(" GROUP BY project_name ORDER BY avg_duration ASC");
+    query_builder.push(" GROUP BY project_full_path ORDER BY avg_duration ASC");
 
     let query = query_builder.build_query_as::<ProjectStat>();
     let stats = query.fetch_all(&state.db).await.unwrap_or_default();
@@ -236,7 +251,7 @@ async fn get_summary_stats(
 ) -> Json<SummaryStat> {
     let use_fast_path = filter.ref_name.as_deref().unwrap_or("All") == "All";
 
-    let key = format!("summary:{}:{}:{}:{:?}:{:?}",
+    let key = format!("summary:{:?}:{:?}:{:?}:{:?}:{:?}",
         filter.project_name.as_deref().unwrap_or("All"),
         filter.ref_name.as_deref().unwrap_or("All"),
         filter.exclude_projects.as_deref().unwrap_or(""),
@@ -279,7 +294,7 @@ async fn get_summary_stats(
             if p.contains(',') {
                 let projects: Vec<&str> = p.split(',').map(|s| s.trim()).collect();
                 if !projects.is_empty() {
-                    query_builder.push(" AND project_name IN (");
+                    query_builder.push(" AND project_full_path IN (");
                     let mut separated = query_builder.separated(", ");
                     for proj in projects {
                         separated.push_bind(proj);
@@ -287,7 +302,7 @@ async fn get_summary_stats(
                     separated.push_unseparated(") ");
                 }
             } else {
-                query_builder.push(" AND project_name = ");
+                query_builder.push(" AND project_full_path = ");
                 query_builder.push_bind(p);
             }
         }
@@ -296,8 +311,20 @@ async fn get_summary_stats(
     if !use_fast_path {
         if let Some(r) = &filter.ref_name {
             if r != "All" && !r.is_empty() {
-                query_builder.push(" AND ref_name = ");
-                query_builder.push_bind(r);
+                if r.contains(',') {
+                    let refs: Vec<&str> = r.split(',').map(|s| s.trim()).collect();
+                    if !refs.is_empty() {
+                        query_builder.push(" AND ref_name IN (");
+                        let mut separated = query_builder.separated(", ");
+                        for rv in refs {
+                            separated.push_bind(rv);
+                        }
+                        separated.push_unseparated(") ");
+                    }
+                } else {
+                    query_builder.push(" AND ref_name = ");
+                    query_builder.push_bind(r);
+                }
             }
         }
     }
@@ -306,7 +333,7 @@ async fn get_summary_stats(
         if !ex.is_empty() {
             let projects: Vec<&str> = ex.split(',').collect();
             if !projects.is_empty() {
-                query_builder.push(" AND project_name NOT IN (");
+                query_builder.push(" AND project_full_path NOT IN (");
                 let mut separated = query_builder.separated(", ");
                 for p in projects {
                     separated.push_bind(p);
@@ -367,7 +394,7 @@ async fn list_pipelines(
                 if p.contains(',') {
                     let projects: Vec<&str> = p.split(',').map(|s| s.trim()).collect();
                     if !projects.is_empty() {
-                        query_builder.push(" AND project_name IN (");
+                        query_builder.push(" AND project_full_path IN (");
                         let mut separated = query_builder.separated(", ");
                         for proj in projects {
                             separated.push_bind(proj);
@@ -375,22 +402,34 @@ async fn list_pipelines(
                         separated.push_unseparated(") ");
                     }
                 } else {
-                    query_builder.push(" AND project_name = ");
+                    query_builder.push(" AND project_full_path = ");
                     query_builder.push_bind(p);
                 }
             }
         }
         if let Some(r) = &filter.ref_name {
             if r != "All" && !r.is_empty() {
-                query_builder.push(" AND ref_name = ");
-                query_builder.push_bind(r);
+                if r.contains(',') {
+                    let refs: Vec<&str> = r.split(',').map(|s| s.trim()).collect();
+                    if !refs.is_empty() {
+                        query_builder.push(" AND ref_name IN (");
+                        let mut separated = query_builder.separated(", ");
+                        for rv in refs {
+                            separated.push_bind(rv);
+                        }
+                        separated.push_unseparated(") ");
+                    }
+                } else {
+                    query_builder.push(" AND ref_name = ");
+                    query_builder.push_bind(r);
+                }
             }
         }
         if let Some(ex) = &filter.exclude_projects {
             if !ex.is_empty() {
                 let projects: Vec<&str> = ex.split(',').collect();
                 if !projects.is_empty() {
-                    query_builder.push(" AND project_name NOT IN (");
+                    query_builder.push(" AND project_full_path NOT IN (");
                     let mut separated = query_builder.separated(", ");
                     for p in projects {
                         separated.push_bind(p);
@@ -441,6 +480,7 @@ async fn list_pipelines(
             id: p.id,
             project_id: p.project_id,
             project_name: p.project_name,
+            project_full_path: p.project_full_path,
             ref_name: p.ref_name,
             sha: p.sha,
             user_name: p.user_name,
@@ -512,7 +552,7 @@ async fn get_stats_trend(
             if p.contains(',') {
                 let projects: Vec<&str> = p.split(',').map(|s| s.trim()).collect();
                 if !projects.is_empty() {
-                    query_builder.push(" AND project_name IN (");
+                    query_builder.push(" AND project_full_path IN (");
                     let mut separated = query_builder.separated(", ");
                     for proj in projects {
                         separated.push_bind(proj);
@@ -520,7 +560,7 @@ async fn get_stats_trend(
                     separated.push_unseparated(") ");
                 }
             } else {
-                query_builder.push(" AND project_name = ");
+                query_builder.push(" AND project_full_path = ");
                 query_builder.push_bind(p);
             }
         }
@@ -529,8 +569,20 @@ async fn get_stats_trend(
     if !use_fast_path {
         if let Some(r) = &filter.ref_name {
             if r != "All" && !r.is_empty() {
-                query_builder.push(" AND ref_name = ");
-                query_builder.push_bind(r);
+                if r.contains(',') {
+                    let refs: Vec<&str> = r.split(',').map(|s| s.trim()).collect();
+                    if !refs.is_empty() {
+                        query_builder.push(" AND ref_name IN (");
+                        let mut separated = query_builder.separated(", ");
+                        for rv in refs {
+                            separated.push_bind(rv);
+                        }
+                        separated.push_unseparated(") ");
+                    }
+                } else {
+                    query_builder.push(" AND ref_name = ");
+                    query_builder.push_bind(r);
+                }
             }
         }
     }
@@ -539,7 +591,7 @@ async fn get_stats_trend(
         if !ex.is_empty() {
             let projects: Vec<&str> = ex.split(',').collect();
             if !projects.is_empty() {
-                query_builder.push(" AND project_name NOT IN (");
+                query_builder.push(" AND project_full_path NOT IN (");
                 let mut separated = query_builder.separated(", ");
                 for p in projects {
                     separated.push_bind(p);
@@ -555,7 +607,7 @@ async fn get_stats_trend(
         query_builder.push(" GROUP BY 1, 2 ORDER BY 1 DESC");
     }
 
-    let key = format!("trend:{}:{}:{}:{}:{:?}:{:?}",
+    let key = format!("trend:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}",
         if use_fast_path { "fast" } else { "slow" },
         filter.project_name.as_deref().unwrap_or("All"),
         filter.ref_name.as_deref().unwrap_or("All"),
@@ -581,8 +633,11 @@ async fn get_stats_trend(
 }
 
 async fn list_projects(State(state): State<AppState>) -> Json<Vec<String>> {
-    let projects = state.monitored_projects.read().unwrap();
-    let mut names: Vec<String> = projects.iter().map(|p| p.path_with_namespace.clone()).collect();
+    let projects = sqlx::query_scalar("SELECT DISTINCT project_full_path FROM pipelines ORDER BY project_full_path")
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+    let mut names = projects;
     names.sort();
     Json(names)
 }

@@ -356,9 +356,10 @@ async fn insert_pipeline(state: &AppState, p: crate::models::Pipeline) {
             }
 
             // increment new status (insert or update) with duration info
-            if let Err(e) = sqlx::query("INSERT INTO daily_stats(date, project_id, project_name, status, count, total_duration, count_with_duration) VALUES (?, ?, ?, ?, 1, ?, ?) ON CONFLICT(date, project_id, status) DO UPDATE SET count = daily_stats.count + 1, total_duration = daily_stats.total_duration + excluded.total_duration, count_with_duration = daily_stats.count_with_duration + excluded.count_with_duration, project_name = excluded.project_name")
+            if let Err(e) = sqlx::query("INSERT INTO daily_stats(date, project_id, project_name, project_full_path, status, count, total_duration, count_with_duration) VALUES (?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT(date, project_id, status) DO UPDATE SET count = daily_stats.count + 1, total_duration = daily_stats.total_duration + excluded.total_duration, count_with_duration = daily_stats.count_with_duration + excluded.count_with_duration, project_full_path = excluded.project_full_path")
                 .bind(&p_date)
                 .bind(p.project_id)
+                .bind(&p.project_name)
                 .bind(&p.project_full_path)
                 .bind(&p.status)
                 .bind(new_dur)
@@ -370,9 +371,10 @@ async fn insert_pipeline(state: &AppState, p: crate::models::Pipeline) {
         }
     } else {
         // New pipeline: increment count and total_duration/count_with_duration for its date/status
-        if let Err(e) = sqlx::query("INSERT INTO daily_stats(date, project_id, project_name, status, count, total_duration, count_with_duration) VALUES (?, ?, ?, ?, 1, ?, ?) ON CONFLICT(date, project_id, status) DO UPDATE SET count = daily_stats.count + 1, total_duration = daily_stats.total_duration + excluded.total_duration, count_with_duration = daily_stats.count_with_duration + excluded.count_with_duration, project_name = excluded.project_name")
+        if let Err(e) = sqlx::query("INSERT INTO daily_stats(date, project_id, project_name,project_full_path, status, count, total_duration, count_with_duration) VALUES (?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT(date, project_id, status) DO UPDATE SET count = daily_stats.count + 1, total_duration = daily_stats.total_duration + excluded.total_duration, count_with_duration = daily_stats.count_with_duration + excluded.count_with_duration, project_full_path = excluded.project_full_path")
             .bind(&p_date)
             .bind(p.project_id)
+            .bind(&p.project_name)
             .bind(&p.project_full_path)
             .bind(&p.status)
             .bind(new_dur)

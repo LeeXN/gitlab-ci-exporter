@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 41,
+  "id": 44,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -100,15 +100,15 @@
               },
               {
                 "key": "project_name",
-                "value": "${project}"
+                "value": "${project:csv}"
               },
               {
                 "key": "ref_name",
-                "value": "${ref}"
+                "value": "${ref:csv}"
               },
               {
                 "key": "exclude_projects",
-                "value": "${exclude_projects}"
+                "value": "${exclude_projects:csv}"
               }
             ]
           }
@@ -211,15 +211,15 @@
               },
               {
                 "key": "project_name",
-                "value": "${project}"
+                "value": "${project:csv}"
               },
               {
                 "key": "ref_name",
-                "value": "${ref}"
+                "value": "${ref:csv}"
               },
               {
                 "key": "exclude_projects",
-                "value": "${exclude_projects}"
+                "value": "${exclude_projects:csv}"
               }
             ]
           }
@@ -324,15 +324,15 @@
               },
               {
                 "key": "project_name",
-                "value": "${project}"
+                "value": "${project:csv}"
               },
               {
                 "key": "ref_name",
-                "value": "${ref}"
+                "value": "${ref:csv}"
               },
               {
-                "key": "exclude_projects",
-                "value": "${exclude_projects}"
+                "key": "exclude_projects:csv",
+                "value": "${exclude_projects:csv}"
               }
             ]
           }
@@ -444,12 +444,24 @@
               "options": "web_url"
             },
             "properties": []
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Project"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 330
+              }
+            ]
           }
         ]
       },
       "gridPos": {
-        "h": 7,
-        "w": 8,
+        "h": 21,
+        "w": 11,
         "x": 0,
         "y": 4
       },
@@ -493,15 +505,15 @@
               },
               {
                 "key": "project_name",
-                "value": "${project}"
+                "value": "${project:csv}"
               },
               {
                 "key": "ref_name",
-                "value": "${ref}"
+                "value": "${ref:csv}"
               },
               {
                 "key": "exclude_projects",
-                "value": "${exclude_projects}"
+                "value": "${exclude_projects:csv}"
               }
             ]
           }
@@ -514,26 +526,38 @@
           "options": {
             "excludeByName": {
               "project_id": true,
+              "project_name": true,
               "ref": true,
               "sha": true,
               "updated_at": true,
-              "user_name": true
+              "user_name": false,
+              "web_url": false
             },
+            "includeByName": {},
             "indexByName": {
-              "created_at": 3,
-              "duration": 5,
-              "finished_at": 4,
+              "created_at": 6,
+              "duration": 8,
+              "finished_at": 7,
               "id": 0,
-              "project_name": 1,
-              "status": 2
+              "project_full_path": 1,
+              "project_id": 9,
+              "project_name": 2,
+              "ref_name": 4,
+              "sha": 10,
+              "status": 5,
+              "user_name": 3,
+              "web_url": 11
             },
             "renameByName": {
               "created_at": "Start Time",
               "duration": "Duration",
               "finished_at": "End Time",
               "id": "Pipeline ID",
+              "project_full_path": "Project",
               "project_name": "Project",
-              "status": "Status"
+              "ref_name": "Ref",
+              "status": "Status",
+              "user_name": "User"
             }
           }
         }
@@ -628,13 +652,25 @@
               "options": "web_url"
             },
             "properties": []
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Project"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 241
+              }
+            ]
           }
         ]
       },
       "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 8,
+        "h": 10,
+        "w": 13,
+        "x": 11,
         "y": 4
       },
       "id": 7,
@@ -649,7 +685,12 @@
           "show": false
         },
         "showHeader": true,
-        "sortBy": []
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Start Time"
+          }
+        ]
       },
       "pluginVersion": "11.1.3",
       "targets": [
@@ -685,15 +726,15 @@
               },
               {
                 "key": "project_name",
-                "value": "${project}"
+                "value": "${project:csv}"
               },
               {
                 "key": "ref_name",
-                "value": "${ref}"
+                "value": "${ref:csv}"
               },
               {
                 "key": "exclude_projects",
-                "value": "${exclude_projects}"
+                "value": "${exclude_projects:csv}"
               }
             ]
           }
@@ -706,25 +747,37 @@
           "options": {
             "excludeByName": {
               "project_id": true,
+              "project_name": true,
               "ref": true,
               "sha": true,
-              "user_name": true
+              "user_name": false,
+              "web_url": false
             },
+            "includeByName": {},
             "indexByName": {
-              "created_at": 3,
-              "duration": 5,
-              "finished_at": 4,
+              "created_at": 6,
+              "duration": 8,
+              "finished_at": 7,
               "id": 0,
-              "project_name": 1,
-              "status": 2
+              "project_full_path": 1,
+              "project_id": 9,
+              "project_name": 2,
+              "ref_name": 4,
+              "sha": 10,
+              "status": 5,
+              "user_name": 3,
+              "web_url": 11
             },
             "renameByName": {
               "created_at": "Start Time",
               "duration": "Duration",
               "finished_at": "End Time",
               "id": "Pipeline ID",
+              "project_full_path": "Project",
               "project_name": "Project",
-              "status": "Status"
+              "ref_name": "Ref",
+              "status": "Status",
+              "user_name": "User"
             }
           }
         }
@@ -819,14 +872,26 @@
               "options": "web_url"
             },
             "properties": []
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Project"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 339
+              }
+            ]
           }
         ]
       },
       "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 4
+        "h": 11,
+        "w": 13,
+        "x": 11,
+        "y": 14
       },
       "id": 8,
       "options": {
@@ -881,15 +946,15 @@
               },
               {
                 "key": "project_name",
-                "value": "${project}"
+                "value": "${project:csv}"
               },
               {
                 "key": "ref_name",
-                "value": "${ref}"
+                "value": "${ref:csv}"
               },
               {
                 "key": "exclude_projects",
-                "value": "${exclude_projects}"
+                "value": "${exclude_projects:csv}"
               }
             ]
           }
@@ -902,25 +967,37 @@
           "options": {
             "excludeByName": {
               "project_id": true,
+              "project_name": true,
               "ref": true,
               "sha": true,
-              "user_name": true
+              "user_name": false,
+              "web_url": false
             },
+            "includeByName": {},
             "indexByName": {
-              "created_at": 3,
-              "duration": 5,
-              "finished_at": 4,
+              "created_at": 6,
+              "duration": 8,
+              "finished_at": 7,
               "id": 0,
+              "project_full_path": 2,
+              "project_id": 9,
               "project_name": 1,
-              "status": 2
+              "ref_name": 4,
+              "sha": 10,
+              "status": 5,
+              "user_name": 3,
+              "web_url": 11
             },
             "renameByName": {
               "created_at": "Start Time",
               "duration": "Duration",
               "finished_at": "End Time",
               "id": "Pipeline ID",
+              "project_full_path": "Project",
               "project_name": "Project",
-              "status": "Status"
+              "ref_name": "Ref",
+              "status": "Status",
+              "user_name": "User"
             }
           }
         }
@@ -990,7 +1067,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 11
+        "y": 25
       },
       "id": 1,
       "options": {
@@ -1051,15 +1128,15 @@
               },
               {
                 "key": "project_name",
-                "value": "${project}"
+                "value": "${project:csv}"
               },
               {
                 "key": "ref_name",
-                "value": "${ref}"
+                "value": "${ref:csv}"
               },
               {
                 "key": "exclude_projects",
-                "value": "${exclude_projects}"
+                "value": "${exclude_projects:csv}"
               }
             ]
           }
@@ -1098,8 +1175,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1126,8 +1202,7 @@
                   "mode": "absolute",
                   "steps": [
                     {
-                      "color": "green",
-                      "value": null
+                      "color": "green"
                     },
                     {
                       "color": "orange",
@@ -1176,7 +1251,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 19
+        "y": 33
       },
       "id": 2,
       "options": {
@@ -1192,8 +1267,8 @@
         "showHeader": true,
         "sortBy": [
           {
-            "desc": false,
-            "displayName": "Last Status"
+            "desc": true,
+            "displayName": "Avg Duration"
           }
         ]
       },
@@ -1208,6 +1283,7 @@
           "filters": [],
           "format": "table",
           "global_query_id": "",
+          "parser": "simple",
           "refId": "A",
           "root_selector": "",
           "source": "url",
@@ -1227,15 +1303,15 @@
               },
               {
                 "key": "project_name",
-                "value": "${project}"
+                "value": "${project:csv}"
               },
               {
                 "key": "ref_name",
-                "value": "${ref}"
+                "value": "${ref:csv}"
               },
               {
                 "key": "exclude_projects",
-                "value": "${exclude_projects}"
+                "value": "${exclude_projects:csv}"
               }
             ]
           }
@@ -1246,17 +1322,22 @@
         {
           "id": "organize",
           "options": {
-            "excludeByName": {},
+            "excludeByName": {
+              "project_name": false
+            },
+            "includeByName": {},
             "indexByName": {
-              "avg_duration": 2,
-              "count": 1,
-              "last_status": 3,
+              "avg_duration": 3,
+              "count": 2,
+              "last_status": 4,
+              "project_full_path": 1,
               "project_name": 0
             },
             "renameByName": {
               "avg_duration": "Avg Duration",
               "count": "Count",
               "last_status": "Last Status",
+              "project_full_path": "Project",
               "project_name": "Project"
             }
           }
@@ -1267,7 +1348,9 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": [],
+  "tags": [
+    "gitlab-ci-exporter"
+  ],
   "templating": {
     "list": [
       {
@@ -1283,6 +1366,7 @@
         "name": "datasource",
         "options": [],
         "query": "yesoreyeram-infinity-datasource",
+        "queryValue": "",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -1303,7 +1387,7 @@
           "type": "yesoreyeram-infinity-datasource",
           "uid": "${datasource}"
         },
-        "definition": "/api/projects",
+        "definition": "Gitlab-ci-exporter- (infinity) json",
         "hide": 0,
         "includeAll": true,
         "label": "Project",
@@ -1311,8 +1395,32 @@
         "name": "project",
         "options": [],
         "query": {
-          "query": "/api/projects",
-          "refId": "StandardVariableQuery"
+          "infinityQuery": {
+            "columns": [
+              {
+                "selector": "name",
+                "text": "",
+                "type": "string"
+              }
+            ],
+            "filters": [],
+            "format": "table",
+            "groq": "*",
+            "pagination_mode": "none",
+            "parser": "backend",
+            "refId": "",
+            "root_selector": "$map($, function($v) { {\"name\": $v} })",
+            "source": "url",
+            "type": "json",
+            "uql": "parse-json",
+            "url": "/api/projects",
+            "url_options": {
+              "data": "",
+              "method": "GET"
+            }
+          },
+          "query": "",
+          "queryType": "infinity"
         },
         "refresh": 1,
         "regex": "",
@@ -1321,41 +1429,76 @@
         "type": "query"
       },
       {
-        "current": {
-          "selected": false,
-          "text": "",
-          "value": ""
-        },
-        "hide": 0,
-        "label": "Branch/Tag",
-        "name": "ref",
-        "options": [
-          {
-            "selected": true,
-            "text": "",
-            "value": ""
-          }
-        ],
-        "query": "",
-        "skipUrlSync": false,
-        "type": "textbox"
-      },
-      {
         "allValue": "All",
         "current": {
           "selected": true,
           "text": [
-            "None"
+            "All"
           ],
           "value": [
-            ""
+            "$__all"
           ]
         },
         "datasource": {
           "type": "yesoreyeram-infinity-datasource",
           "uid": "${datasource}"
         },
-        "definition": "/api/projects",
+        "definition": "Gitlab-ci-exporter- (infinity) json",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Branch/Tag",
+        "multi": true,
+        "name": "ref",
+        "options": [],
+        "query": {
+          "infinityQuery": {
+            "columns": [
+              {
+                "selector": "name",
+                "text": "",
+                "type": "string"
+              }
+            ],
+            "filters": [],
+            "format": "table",
+            "groq": "*",
+            "parser": "backend",
+            "refId": "variable",
+            "root_selector": "$map($, function($v) { {\"name\": $v} })",
+            "source": "url",
+            "type": "json",
+            "uql": "parse-json",
+            "url": "/api/refs",
+            "url_options": {
+              "data": "",
+              "method": "GET"
+            }
+          },
+          "query": "",
+          "queryType": "infinity"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "allValue": " ",
+        "current": {
+          "selected": true,
+          "text": [
+            "None"
+          ],
+          "value": [
+            " "
+          ]
+        },
+        "datasource": {
+          "type": "yesoreyeram-infinity-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "Gitlab-ci-exporter- (infinity) json",
         "description": "Projects to exclude",
         "hide": 0,
         "includeAll": false,
@@ -1364,8 +1507,25 @@
         "name": "exclude_projects",
         "options": [],
         "query": {
-          "query": "/api/projects",
-          "refId": "StandardVariableQuery"
+          "infinityQuery": {
+            "columns": [],
+            "filters": [],
+            "format": "table",
+            "groq": "*",
+            "parser": "backend",
+            "refId": "variable",
+            "root_selector": "$append([{\"name\": \"None\", \"value\": \" \"}], $map($, function($v) { {\"name\": $v, \"value\": $v} }))",
+            "source": "url",
+            "type": "json",
+            "uql": "parse-json",
+            "url": "/api/projects",
+            "url_options": {
+              "data": "",
+              "method": "GET"
+            }
+          },
+          "query": "",
+          "queryType": "infinity"
         },
         "refresh": 1,
         "regex": "",

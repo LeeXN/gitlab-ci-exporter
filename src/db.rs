@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     date TEXT NOT NULL,
     project_id INTEGER NOT NULL,
     project_name TEXT NOT NULL,
+    project_full_path TEXT NOT NULL,
     status TEXT NOT NULL,
     count INTEGER DEFAULT 0,
     total_duration INTEGER DEFAULT 0,
@@ -84,21 +85,21 @@ pub async fn backfill_daily_stats(pool: &Pool<Sqlite>) -> Result<()> {
 
     // Insert aggregated counts and total durations, upsert on conflict
     let q = r#"
-    INSERT INTO daily_stats (date, project_id, project_name, status, count, total_duration, count_with_duration)
+    INSERT INTO daily_stats (date, project_id, project_full_path, status, count, total_duration, count_with_duration)
     SELECT date(created_at, 'unixepoch') as date,
            project_id,
-           project_name,
+           project_full_path,
            status,
            COUNT(*) as count,
            COALESCE(SUM(duration),0) as total_duration,
            SUM(CASE WHEN duration IS NOT NULL THEN 1 ELSE 0 END) as count_with_duration
     FROM pipelines
-    GROUP BY date, project_id, project_name, status
+    GROUP BY date, project_id, project_full_path, status
     ON CONFLICT(date, project_id, status) DO UPDATE SET
         count = excluded.count,
         total_duration = excluded.total_duration,
         count_with_duration = excluded.count_with_duration,
-        project_name = excluded.project_name
+        project_full_path = excluded.project_full_path
     "#;
 
     sqlx::query(q).execute(&mut *tx).await?;
