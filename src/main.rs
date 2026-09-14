@@ -1,4 +1,5 @@
 mod api;
+mod cli;
 mod config;
 mod db;
 mod gitlab_ops;
@@ -10,7 +11,8 @@ mod state;
 
 use crate::config::Config;
 use crate::state::AppState;
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
+use chrono::{Duration, Utc};
 use gitlab::GitlabBuilder;
 use std::sync::{Arc, RwLock};
 use tracing::info;
@@ -18,6 +20,12 @@ use moka::future::Cache;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let command = cli::parse(std::env::args()).map_err(anyhow::Error::msg)?;
+    if matches!(command, cli::Command::Help) {
+        println!("{}", cli::USAGE);
+        return Ok(());
+    }
+
     // Initialize logging
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -32,11 +40,6 @@ async fn main() -> Result<()> {
 
     // Initialize DB
     let db = db::init_db().await.expect("Failed to initialize database");
-
-    // Record service start time as initial poll watermark
-    if let Err(e) = crate::db::set_last_poll(&db, chrono::Utc::now().timestamp()).await {
-        tracing::warn!("Failed to set initial poll watermark: {}", e);
-    }
 
     // Check if this is a fresh install (no pipelines)
     let pipeline_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pipelines")
@@ -86,9 +89,49 @@ async fn main() -> Result<()> {
             .build(),
     };
 
+    if let cli::Command::Backfill { days, from } = command {
+        let now = Utc::now();
+        let updated_after = match (days, from) {
+            (Some(days), None) => now - Duration::days(days),
+            (None, Some(from)) => from,
+            (None, None) => {
+                let configured_days = state.config.poller.backfill_days;
+                if configured_days <= 0 {
+                    return Err(anyhow!(
+                        "poller.backfill_days must be positive when no backfill range is supplied"
+                    ));
+                }
+                now - Duration::days(configured_days)
+            }
+            (Some(_), Some(_)) => unreachable!("CLI parser rejects both backfill range options"),
+        };
+
+        if updated_after >= now {
+            return Err(anyhow!("backfill start time must be earlier than the current time"));
+        }
+
+        info!(
+            "Starting one-shot backfill for pipelines updated after {}",
+            updated_after.to_rfc3339()
+        );
+        let report = monitor::perform_backfill(state.clone(), updated_after)
+            .await
+            .context("pipeline backfill failed")?;
+        crate::db::backfill_daily_stats(&state.db)
+            .await
+            .context("daily_stats rebuild failed after pipeline backfill")?;
+        info!(
+            "Backfill complete: projects={}, fetched={}, filtered={}, upserted={}",
+            report.projects, report.fetched, report.filtered, report.upserted
+        );
+        return Ok(());
+    }
+
     // Perform initial backfill if needed (BLOCKING)
     if is_fresh_install {
-        monitor::perform_initial_backfill(state.clone()).await;
+        if let Err(e) = monitor::perform_initial_backfill(state.clone()).await {
+            tracing::error!("Initial backfill failed: {}", e);
+        }
         // After initial backfill, asynchronously backfill usernames (do not block server start)
         let username_state = state.clone();
         tokio::spawn(async move {
