@@ -1,16 +1,8 @@
+# Local SQLite data
 *.db
-/target
 
+# Rust build artifacts
+/target/
 
-# Added by cargo
-#
-# already existing elements were commented out
-
-#/target
-
-
-# Added by cargo
-#
-# already existing elements were commented out
-
-#/target
+# Local editor settings
+.vscode/
