@@ -1,81 +1,131 @@
 use crate::gitlab_ops;
 use crate::state::AppState;
-use chrono::Utc;
+use anyhow::{Context, Result, bail};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use regex::Regex;
 use std::time::Duration as StdDuration;
 use tokio::time::sleep;
 use tracing::{error, info};
 use crate::db;
-use chrono::TimeZone;
 
-pub async fn perform_initial_backfill(state: AppState) {
-    info!("Starting initial backfill via REST API...");
-    
-    let branch_filter = if let Some(re) = &state.config.gitlab.branch_filter_regex {
-        match Regex::new(re) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                error!("Invalid branch filter regex: {}", e);
-                None
-            }
-        }
-    } else {
-        None
+#[derive(Debug, Default)]
+pub struct BackfillReport {
+    pub projects: usize,
+    pub fetched: usize,
+    pub filtered: usize,
+    pub upserted: usize,
+}
+
+pub async fn perform_initial_backfill(state: AppState) -> Result<BackfillReport> {
+    let backfill_days = state.config.poller.backfill_days;
+    if backfill_days <= 0 {
+        bail!("poller.backfill_days must be positive");
+    }
+
+    let updated_after = Utc::now() - Duration::days(backfill_days);
+    perform_backfill(state, updated_after).await
+}
+
+pub async fn perform_backfill(
+    state: AppState,
+    updated_after: DateTime<Utc>,
+) -> Result<BackfillReport> {
+    info!(
+        "Starting REST backfill for pipelines updated after {}",
+        updated_after.to_rfc3339()
+    );
+
+    let branch_filter = match &state.config.gitlab.branch_filter_regex {
+        Some(re) => Some(
+            Regex::new(re)
+                .with_context(|| format!("invalid branch filter regex `{re}`"))?,
+        ),
+        None => None,
     };
 
     info!("Discovering all projects for backfill...");
-    let projects = match gitlab_ops::discover_projects(&state.gitlab_client, &state.config.gitlab.monitor_groups, None).await {
-        Ok(p) => p,
-        Err(e) => {
-            error!("Failed to discover projects: {}", e);
-            return;
-        }
-    };
+    let discovered_projects = gitlab_ops::discover_projects(
+        &state.gitlab_client,
+        &state.config.gitlab.monitor_groups,
+        None,
+    )
+    .await
+    .context("failed to discover projects")?;
+
+    // A project can be returned more than once when groups overlap.
+    let mut seen_project_ids = std::collections::HashSet::new();
+    let projects: Vec<_> = discovered_projects
+        .into_iter()
+        .filter(|project| seen_project_ids.insert(project.id))
+        .collect();
     info!("Discovered {} projects for backfill", projects.len());
 
-    // store monitored projects in state for API listing
+    // Store monitored projects in state for API listing when this is the initial run.
     {
-        let mut mp = state.monitored_projects.write().unwrap();
-        mp.clear();
-        for pr in &projects {
-            mp.push(pr.clone());
-        }
+        let mut monitored_projects = state.monitored_projects.write().unwrap();
+        monitored_projects.clear();
+        monitored_projects.extend(projects.iter().cloned());
     }
 
-    let backfill_cutoff = chrono::Utc::now().timestamp() - (state.config.poller.backfill_days * 86400);
-    let updated_after = Some(chrono::DateTime::from_timestamp(backfill_cutoff, 0).unwrap_or_default());
-
-    // Concurrently fetch pipelines for projects in batches
     let concurrency: usize = 10;
-    let mut id_to_project = std::collections::HashMap::new();
-    let mut project_ids = Vec::new();
-    for project in projects.iter() {
-        id_to_project.insert(project.id, project.clone());
-        project_ids.push(project.id);
-    }
+    let id_to_project: std::collections::HashMap<_, _> = projects
+        .iter()
+        .map(|project| (project.id, project))
+        .collect();
+    let project_ids: Vec<_> = projects.iter().map(|project| project.id).collect();
 
-    info!("Fetching pipelines for {} projects concurrently (concurrency={})", project_ids.len(), concurrency);
-    match gitlab_ops::fetch_pipelines_concurrent(&state.gitlab_client, project_ids, updated_after, concurrency).await {
-        Ok(results) => {
-            for (pid, pipelines) in results {
-                let project = match id_to_project.get(&pid) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                info!("Fetched {} pipelines for project {}", pipelines.len(), project.name);
-                for p in pipelines {
-                    if let Some(re) = &branch_filter {
-                        if !re.is_match(&p.r#ref) { continue; }
-                    }
-                    let db_p = p.to_db_pipeline(project.id as i64, &project.name, &project.path_with_namespace);
-                    insert_pipeline(&state, db_p).await;
+    info!(
+        "Fetching pipelines for {} projects concurrently (concurrency={})",
+        project_ids.len(),
+        concurrency
+    );
+    let results = gitlab_ops::fetch_pipelines_concurrent(
+        &state.gitlab_client,
+        project_ids,
+        Some(updated_after),
+        concurrency,
+    )
+    .await
+    .context("failed to fetch pipelines")?;
+
+    let mut report = BackfillReport {
+        projects: projects.len(),
+        ..BackfillReport::default()
+    };
+
+    for (project_id, pipelines) in results {
+        let project = id_to_project
+            .get(&project_id)
+            .ok_or_else(|| anyhow::anyhow!("fetched an unknown project id {project_id}"))?;
+        info!(
+            "Fetched {} pipelines for project {}",
+            pipelines.len(),
+            project.name
+        );
+
+        for pipeline in pipelines {
+            report.fetched += 1;
+            if let Some(re) = &branch_filter {
+                if !re.is_match(&pipeline.r#ref) {
+                    report.filtered += 1;
+                    continue;
                 }
             }
+
+            let pipeline_id = pipeline.id;
+            let db_pipeline = pipeline.to_db_pipeline(
+                project.id as i64,
+                &project.name,
+                &project.path_with_namespace,
+            );
+            insert_pipeline(&state, db_pipeline)
+                .await
+                .with_context(|| format!("failed to upsert pipeline {pipeline_id}"))?;
+            report.upserted += 1;
         }
-        Err(e) => error!("Concurrent fetch_pipelines failed: {}", e),
     }
-    
-    info!("Initial backfill complete.");
+
+    Ok(report)
 }
 
 pub async fn backfill_usernames(state: AppState) {
@@ -206,8 +256,12 @@ pub async fn start_monitor_loop(state: AppState) {
                                 if !re.is_match(&pipeline.ref_name) { continue; }
                             }
                             let db_p = pipeline.to_db_pipeline(proj.id as i64, &proj.name, &proj.full_path);
-                            insert_pipeline(&state, db_p).await;
-                            info!("Processed pipeline {} for project {}", pipeline.id, proj.name);
+                            let pipeline_id = pipeline.id;
+                            if let Err(e) = insert_pipeline(&state, db_p).await {
+                                error!("Failed to process pipeline {} for project {}: {}", pipeline_id, proj.name, e);
+                                continue;
+                            }
+                            info!("Processed pipeline {} for project {}", pipeline_id, proj.name);
                         }
                     }
                 },
@@ -228,23 +282,25 @@ pub async fn start_monitor_loop(state: AppState) {
     }
 }
 
-async fn insert_pipeline(state: &AppState, p: crate::models::Pipeline) {
+async fn insert_pipeline(state: &AppState, p: crate::models::Pipeline) -> Result<()> {
     // Use a transaction to upsert pipeline and maintain daily_stats atomically
-    let mut tx = match state.db.begin().await {
-        Ok(t) => t,
-        Err(e) => { error!("Failed to begin transaction: {}", e); return; }
-    };
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .context("failed to begin pipeline transaction")?;
 
     // Fetch existing pipeline if any
-    let existing: Option<(String, Option<i64>, i64)> = match sqlx::query_as(
+    let existing: Option<(String, Option<i64>, i64)> = sqlx::query_as(
         "SELECT status, duration, created_at FROM pipelines WHERE id = ?",
-    ).bind(p.id).fetch_optional(&mut *tx).await {
-        Ok(r) => r,
-        Err(e) => { error!("Failed to query existing pipeline {}: {}", p.id, e); let _ = tx.rollback().await; return; }
-    };
+    )
+    .bind(p.id)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| format!("failed to query existing pipeline {}", p.id))?;
 
     // Upsert pipeline row
-    match sqlx::query(
+    sqlx::query(
         r#"
         INSERT INTO pipelines (id, project_id, project_name, project_full_path, ref_name, user_name, sha, status, created_at, finished_at, web_url, duration)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -277,10 +333,9 @@ async fn insert_pipeline(state: &AppState, p: crate::models::Pipeline) {
     .bind(p.finished_at)
     .bind(&p.web_url)
     .bind(p.duration)
-    .execute(&mut *tx).await {
-        Err(e) => { error!("Failed to upsert pipeline {}: {}", p.id, e); let _ = tx.rollback().await; return; }
-        Ok(_) => {}
-    }
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("failed to upsert pipeline {}", p.id))?;
 
     // Prepare date string for aggregation (YYYY-MM-DD)
     let p_date = chrono::Utc.timestamp_opt(p.created_at, 0).single()
@@ -312,7 +367,8 @@ async fn insert_pipeline(state: &AppState, p: crate::models::Pipeline) {
                             .bind(&p.status)
                             .execute(&mut *tx).await {
                             error!("Failed to update daily_stats duration for pipeline {}: {}", p.id, e);
-                            let _ = tx.rollback().await; return;
+                            let _ = tx.rollback().await;
+                            return Err(e.into());
                         }
                     }
                 }
@@ -325,7 +381,8 @@ async fn insert_pipeline(state: &AppState, p: crate::models::Pipeline) {
                         .bind(&p.status)
                         .execute(&mut *tx).await {
                         error!("Failed to update daily_stats adding duration for pipeline {}: {}", p.id, e);
-                        let _ = tx.rollback().await; return;
+                        let _ = tx.rollback().await;
+                        return Err(e.into());
                     }
                 }
                 (true, false) => {
@@ -337,7 +394,8 @@ async fn insert_pipeline(state: &AppState, p: crate::models::Pipeline) {
                         .bind(&p.status)
                         .execute(&mut *tx).await {
                         error!("Failed to update daily_stats removing duration for pipeline {}: {}", p.id, e);
-                        let _ = tx.rollback().await; return;
+                        let _ = tx.rollback().await;
+                        return Err(e.into());
                     }
                 }
                 (false, false) => { /* nothing to do */ }
@@ -352,7 +410,8 @@ async fn insert_pipeline(state: &AppState, p: crate::models::Pipeline) {
                 .bind(&old_status)
                 .execute(&mut *tx).await {
                 error!("Failed to decrement old daily_stats for pipeline {}: {}", p.id, e);
-                let _ = tx.rollback().await; return;
+                let _ = tx.rollback().await;
+                return Err(e.into());
             }
 
             // increment new status (insert or update) with duration info
@@ -366,7 +425,8 @@ async fn insert_pipeline(state: &AppState, p: crate::models::Pipeline) {
                 .bind(if new_has_dur { 1 } else { 0 })
                 .execute(&mut *tx).await {
                 error!("Failed to increment new daily_stats for pipeline {}: {}", p.id, e);
-                let _ = tx.rollback().await; return;
+                let _ = tx.rollback().await;
+                return Err(e.into());
             }
         }
     } else {
@@ -381,11 +441,13 @@ async fn insert_pipeline(state: &AppState, p: crate::models::Pipeline) {
             .bind(if new_has_dur { 1 } else { 0 })
             .execute(&mut *tx).await {
             error!("Failed to insert daily_stats for new pipeline {}: {}", p.id, e);
-            let _ = tx.rollback().await; return;
+            let _ = tx.rollback().await;
+            return Err(e.into());
         }
     }
 
-    if let Err(e) = tx.commit().await {
-        error!("Failed to commit pipeline insert transaction for {}: {}", p.id, e);
-    }
+    tx.commit()
+        .await
+        .with_context(|| format!("failed to commit pipeline transaction for {}", p.id))?;
+    Ok(())
 }

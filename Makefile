@@ -27,4 +27,7 @@ docker-build:
 	docker build -t leex2019/$(BINARY):latest .
 
 docker-run:
-	docker run --rm -p $(PORT):$(PORT) -v $(PWD)/config.toml:/app/config.toml leex2019/$(BINARY):latest
+	docker run --rm -p $(PORT):$(PORT) \
+		-v gitlab-ci-exporter-data:/app \
+		-v $(PWD)/config.toml:/app/config.toml:ro \
+		leex2019/$(BINARY):latest

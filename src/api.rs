@@ -62,39 +62,6 @@ pub fn app_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct StatusCount {
-    pub status: String,
-    pub count: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct FailProject {
-    pub project_name: String,
-    pub count: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct BucketCount {
-    pub bucket: String,
-    pub count: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct ProjectHealth {
-    pub project_name: String,
-    pub success_rate: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FailedJobLog {
-    pub time: String,
-    pub level: String,
-    pub project: String,
-    pub message: String,
-    pub pipeline_id: i64,
-}
-
 async fn trigger_refresh_daily_stats(State(state): State<AppState>) -> Json<&'static str> {
     match crate::db::backfill_daily_stats(&state.db).await {
         Ok(_) => Json("daily_stats backfill triggered/completed"),

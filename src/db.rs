@@ -85,17 +85,19 @@ pub async fn backfill_daily_stats(pool: &Pool<Sqlite>) -> Result<()> {
 
     // Insert aggregated counts and total durations, upsert on conflict
     let q = r#"
-    INSERT INTO daily_stats (date, project_id, project_full_path, status, count, total_duration, count_with_duration)
+    INSERT INTO daily_stats (date, project_id, project_name, project_full_path, status, count, total_duration, count_with_duration)
     SELECT date(created_at, 'unixepoch') as date,
            project_id,
+           project_name,
            project_full_path,
            status,
            COUNT(*) as count,
            COALESCE(SUM(duration),0) as total_duration,
            SUM(CASE WHEN duration IS NOT NULL THEN 1 ELSE 0 END) as count_with_duration
     FROM pipelines
-    GROUP BY date, project_id, project_full_path, status
+    GROUP BY date(created_at, 'unixepoch'), project_id, project_name, project_full_path, status
     ON CONFLICT(date, project_id, status) DO UPDATE SET
+        project_name = excluded.project_name,
         count = excluded.count,
         total_duration = excluded.total_duration,
         count_with_duration = excluded.count_with_duration,
@@ -106,4 +108,69 @@ pub async fn backfill_daily_stats(pool: &Pool<Sqlite>) -> Result<()> {
 
     tx.commit().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::backfill_daily_stats;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn backfill_daily_stats_preserves_project_name() -> anyhow::Result<()> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE pipelines (
+                id INTEGER PRIMARY KEY,
+                project_id INTEGER NOT NULL,
+                project_name TEXT NOT NULL,
+                project_full_path TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                duration INTEGER
+            );
+            CREATE TABLE daily_stats (
+                date TEXT NOT NULL,
+                project_id INTEGER NOT NULL,
+                project_name TEXT NOT NULL,
+                project_full_path TEXT NOT NULL,
+                status TEXT NOT NULL,
+                count INTEGER DEFAULT 0,
+                total_duration INTEGER DEFAULT 0,
+                count_with_duration INTEGER DEFAULT 0,
+                PRIMARY KEY (date, project_id, status)
+            );
+            "#,
+        )
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO pipelines (id, project_id, project_name, project_full_path, status, created_at, duration) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(1_i64)
+        .bind(7_i64)
+        .bind("demo")
+        .bind("group/demo")
+        .bind("success")
+        .bind(0_i64)
+        .bind(12_i64)
+        .execute(&pool)
+        .await?;
+
+        backfill_daily_stats(&pool).await?;
+
+        let row: (String, i64, i64, i64) = sqlx::query_as(
+            "SELECT project_name, count, total_duration, count_with_duration FROM daily_stats",
+        )
+        .fetch_one(&pool)
+        .await?;
+
+        assert_eq!(row, ("demo".to_string(), 1, 12, 1));
+        Ok(())
+    }
 }

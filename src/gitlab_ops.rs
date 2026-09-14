@@ -1,5 +1,5 @@
 use crate::gitlab_types::{GitlabPipeline, ProjectInfo};
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use gitlab::api::{groups, projects, AsyncQuery, Pagination, paged};
 use gitlab::AsyncGitlab;
@@ -101,17 +101,27 @@ pub async fn fetch_pipelines_concurrent(
     }
 
     let mut results = Vec::new();
+    let mut failures = Vec::new();
     while let Some(res) = join_set.join_next().await {
         match res {
             Ok((pid, Ok(pipes))) => results.push((pid, pipes)),
             Ok((pid, Err(e))) => {
                 tracing::error!("fetch_pipelines failed for {}: {}", pid, e);
-                results.push((pid, Vec::new()));
+                failures.push(format!("project {pid}: {e}"));
             }
             Err(e) => {
                 tracing::error!("task join error: {}", e);
+                failures.push(format!("pipeline fetch task: {e}"));
             }
         }
+    }
+
+    if !failures.is_empty() {
+        return Err(anyhow!(
+            "{} project pipeline fetch(es) failed: {}",
+            failures.len(),
+            failures.join("; ")
+        ));
     }
 
     Ok(results)

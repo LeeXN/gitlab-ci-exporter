@@ -1,128 +1,150 @@
 # gitlab-ci-exporter
 
+**[中文文档](README.zh-CN.md)**
+
 ![Dashboard Preview](screenshots/Gitlab-CI-Monitor-Dashboards-Grafana.png)
 
-gitlab-ci-exporter collects GitLab CI pipeline metrics, persists them in a local SQLite database, and exposes HTTP endpoints for monitoring, dashboards and integrations. This README provides quick start steps, configuration details, and explains the exporter’s unique historical backfill capability.
+`gitlab-ci-exporter` collects GitLab CI pipeline data, persists it in a local SQLite database, and exposes HTTP JSON endpoints for monitoring dashboards and integrations.
 
-**Highlights**
-- Lightweight HTTP exporter with built-in persistence (`pipelines.db`).
-- Grafana-friendly JSON endpoints (works well with Infinity datasource).
-- Historical backfill: can fetch and import past pipeline history from GitLab to fill missing data.
+## Features
 
-## Quick Start
+- Persistent pipeline history in `pipelines.db`.
+- Incremental monitoring through the GitLab GraphQL API.
+- Historical import through the REST API, including a one-shot CLI backfill command.
+- Aggregated statistics for Grafana and other HTTP clients.
+- Idempotent pipeline upserts keyed by the GitLab pipeline ID.
 
-Prerequisites
-- Rust toolchain (for building locally)
-- Docker (optional)
+## Quick start
 
-Build and run locally
+Prerequisites:
+
+- Rust toolchain for local builds.
+- Docker for containerized builds and deployments (optional).
+
+Build and run locally:
 
 ```bash
 make build
 make run
 ```
 
-Default server: 0.0.0.0:3000 (see `config.toml`).
+The default listener is `0.0.0.0:3000`. See `config.toml` for configuration.
 
-Run with Docker
+Build and run with Docker:
 
 ```bash
 make docker-build
 make docker-run
-# or: docker run --rm -p 3000:3000 -v $(pwd)/config.toml:/app/config.toml gitlab-ci-exporter:latest
 ```
 
-## Features
-
-- Metrics & endpoints: exposes JSON APIs for pipelines, projects and aggregated statistics.
-- Persistence: stores pipeline records in `pipelines.db` (SQLite) so historical metrics are available across restarts.
-- Historical Backfill: configurable mode to fetch past pipelines from GitLab and populate the local DB — useful for initial import or recovering missed history.
-
-## Historical Backfill (important)
-
-What it does
-- Backfill fetches pipelines from GitLab for configured groups/projects and saves them into `pipelines.db`, enabling historical charts and accurate trend analysis.
-
-Where to configure
-- The backfill options live in the `[poller]` section of `config.toml` (see below).
-
-Typical options
-
-What it does
-- When configured, the exporter can import past pipelines from GitLab into the local `pipelines.db` to provide historical metrics.
-
-Where to configure
-- The backfill option is configured in the `[poller]` section of `config.toml`.
-
-Typical option
-- `backfill_days` (integer): enable initial backfill and specify how many days of history to import (for example `30` to import the last 30 days).
-
-Behavior notes
-- The importer runs only on initial startup when there is no local database file or when the stored history is empty. In that case the exporter will fetch historical pipelines based on `backfill_days` and write them into `pipelines.db` before starting the HTTP service.
-- After historical pipelines are written the HTTP service starts. Enrichment tasks (for example filling missing `username` fields) may run asynchronously and will not block normal monitoring once the service is up.
-
-Usage guidance
-- Use backfill during the first deployment to populate historical data; disable or omit it for regular runs.
-- Backfill consumes GitLab API quota — choose a reasonable `backfill_days` value and monitor API limits.
+The Makefile stores the database in the named volume `gitlab-ci-exporter-data` and mounts the local `config.toml` read-only.
 
 ## Configuration
 
-Place `config.toml` in the process working directory. Key sections:
+The process reads `config.toml` from its current working directory.
 
-- `[server]` — `host` and `port` for the HTTP server.
-- `[gitlab]` — `url`, `token`, `monitor_groups` (or projects list).
-- `[poller]` — controls polling interval and backfill settings (see above).
+- `[server]`: HTTP `host` and `port`.
+- `[gitlab]`: GitLab `url`, access `token`, monitored `monitor_groups`, and the optional `branch_filter_regex`.
+- `[poller]`: polling interval and startup backfill settings.
 
-Example: see the repository `config.toml` for default values and comments.
+Example:
 
-## API Endpoints (examples)
+```toml
+[server]
+host = "0.0.0.0"
+port = 3000
 
-- `GET /api/stats/summary` — aggregated counts and rates.
-- `GET /api/pipelines` — list of stored pipelines.
-- `GET /api/projects` — projects being monitored.
+[gitlab]
+url = "https://gitlab.example.com"
+token = "your-gitlab-token"
+monitor_groups = ["group/subgroup"]
+branch_filter_regex = ".*"
 
-Example responses (masking applied):
+[poller]
+interval_seconds = 30
+backfill_days = 30
+```
 
-`GET /api/stats/summary`
+Keep the access token out of source control and restrict access to the configuration file.
+
+## Historical backfill
+
+### Startup backfill
+
+On a fresh installation (no stored pipelines), the service imports the last `poller.backfill_days` days before starting the HTTP server. Set this value to a positive number. Username enrichment runs asynchronously after the initial import.
+
+### One-shot CLI backfill
+
+Use the CLI when an existing database needs a historical catch-up or a repeatable manual import:
+
+```bash
+# Use poller.backfill_days from config.toml
+./target/release/gitlab-ci-exporter backfill
+
+# Import pipelines updated during the last 30 days
+./target/release/gitlab-ci-exporter backfill --days 30
+
+# Import pipelines updated after an RFC3339 timestamp
+./target/release/gitlab-ci-exporter backfill \
+  --from 2026-08-01T00:00:00Z
+```
+
+The aliases `--backfill-days` and `--backfill-from` are also supported. The command uses the current working directory for `config.toml` and `pipelines.db`, does not clear the database, upserts repeated pipeline IDs, rebuilds `daily_stats`, and exits after completion.
+
+To inspect all options:
+
+```bash
+./target/release/gitlab-ci-exporter --help
+```
+
+## API endpoints
+
+- `GET /api/pipelines` — list stored pipelines.
+- `GET /api/projects` — list projects present in the database.
+- `GET /api/refs` — list stored refs.
+- `GET /api/stats/summary` — aggregated count, duration and success rate.
+- `GET /api/stats/projects` — per-project statistics.
+- `GET /api/stats/trend` — time-series statistics.
+- `POST /api/refresh_daily_stats` — rebuild aggregated daily statistics.
+
+Example response from `GET /api/stats/summary`:
 
 ```json
 {
-	"total_count": 1200,
-	"avg_duration": 330.7,
-	"success_rate": 92.3
+  "total_count": 1200,
+  "avg_duration": 330.7,
+  "success_rate": 92.3
 }
 ```
 
-`GET /api/pipelines`
+## Grafana
 
-```json
-[
-	{
-		"id": 1234,
-		"project_name": "org/project-****",
-		"ref": "main",
-		"status": "success",
-		"created_at": "2025-12-18T12:34:56Z",
-		"finished_at": "2025-12-18T12:37:30Z",
-		"duration": 154
-	}
-]
+Import `grafana_dashboard.json` in Grafana and configure the `datasource` variable to use an Infinity datasource that can reach the exporter HTTP address.
+
+## Docker deployment
+
+Build the image:
+
+```bash
+docker build -t gitlab-ci-exporter:latest .
 ```
 
-## Grafana dashboard
+Run it with persistent storage and a custom configuration:
 
-Import `grafana_dashboard.json` (Dashboard → Import). The dashboard uses the Infinity datasource plugin (`yesoreyeram-infinity-datasource`) to query the exporter HTTP APIs. After import, configure the dashboard variable `datasource` to point to your Infinity datasource.
+```bash
+docker volume create gitlab-ci-exporter-data
+docker run -d \
+  --name gitlab-ci-exporter \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -v gitlab-ci-exporter-data:/app \
+  -v "$PWD/config.toml:/app/config.toml:ro" \
+  gitlab-ci-exporter:latest
+```
 
-## Makefile targets
+The runtime image runs as a non-root user and keeps the SQLite database in `/app`.
 
-- `make build` — build release binary
-- `make run` — run using `cargo run --release`
-- `make docker-build` / `make docker-run`
-- `make test`, `make fmt`, `make clippy`, `make clean`
-
-## Deployment examples
-
-systemd (example)
+## systemd deployment
 
 ```bash
 sudo mkdir -p /var/lib/gitlab-ci-exporter
@@ -147,24 +169,23 @@ Environment=RUST_LOG=info
 WantedBy=multi-user.target
 EOF
 
-sudo systemctl daemon-reload && sudo systemctl enable --now gitlab-ci-exporter
+sudo systemctl daemon-reload
+sudo systemctl enable --now gitlab-ci-exporter
 sudo journalctl -u gitlab-ci-exporter -f
-```
-
-Docker example
-
-```bash
-docker build -t gitlab-ci-exporter:latest .
-docker run -d --name gitlab-ci-exporter -p 3000:3000 -v /opt/gitlab-ci-exporter/data:/app --restart unless-stopped gitlab-ci-exporter:latest
 ```
 
 ## Troubleshooting
 
-- If Grafana shows no data, confirm the Infinity datasource can reach `server.host:server.port` and the exporter is running.
+- If Grafana shows no data, confirm that the datasource can reach `server.host:server.port` and inspect the service logs.
 - Check logs with `journalctl -u gitlab-ci-exporter -f` or `docker logs -f gitlab-ci-exporter`.
-- `pipelines.db` stores persisted pipelines — back it up to preserve history.
+- Back up `pipelines.db` before maintenance or migrations.
 
-## Contributing
+## Development
 
-Please open issues or pull requests for bugs and improvements.
+```bash
+make test
+make fmt
+make clippy
+```
 
+Please open an issue or pull request for bugs and improvements.
